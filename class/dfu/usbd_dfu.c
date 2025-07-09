@@ -100,6 +100,7 @@ static void dfu_request_detach(void)
         g_usbd_dfu.wblock_num = 0U;
         g_usbd_dfu.wlength = 0U;
     }
+    dfu_detach();
 }
 
 static void dfu_request_upload(struct usb_setup_packet *setup, uint8_t **data, uint32_t *len)
@@ -501,5 +502,9 @@ __WEAK uint16_t dfu_erase_flash(uint32_t add)
 }
 
 __WEAK void dfu_leave(void)
+{
+}
+
+__WEAK void dfu_detach(void)
 {
 }
