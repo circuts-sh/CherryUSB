@@ -76,7 +76,7 @@ struct dwc2_ep_state {
 /* Driver state */
 USB_NOCACHE_RAM_SECTION struct dwc2_udc {
     USB_MEM_ALIGNX struct usb_setup_packet setup;
-    uint8_t pad[24]; /* Pad to 32 bytes */
+    USB_MEM_ALIGNX uint8_t pad; /* Pad to CONFIG_USB_ALIGN_SIZE bytes */
     struct dwc2_hw_params hw_params;
     struct dwc2_user_params user_params;
     struct dwc2_ep_state in_ep[16];  /*!< IN endpoint parameters*/
@@ -777,6 +777,7 @@ int usbd_ep_set_stall(uint8_t busid, const uint8_t ep)
     }
 
     if ((ep_idx == 0) && g_dwc2_udc[busid].user_params.device_dma_enable) {
+        usb_dcache_invalidate((uintptr_t)&g_dwc2_udc[busid].setup, USB_ALIGN_UP(8, CONFIG_USB_ALIGN_SIZE));
         dwc2_ep0_start_read_setup(busid, (uint8_t *)&g_dwc2_udc[busid].setup);
     }
 
@@ -877,8 +878,12 @@ int usbd_ep_start_write(uint8_t busid, const uint8_t ep, const uint8_t *data, ui
             USB_OTG_INEP(ep_idx)->DIEPCTL &= ~USB_OTG_DIEPCTL_SODDFRM;
             USB_OTG_INEP(ep_idx)->DIEPCTL |= USB_OTG_DIEPCTL_SD0PID_SEVNFRM;
         }
+    }
+
+    if (g_dwc2_udc[busid].in_ep[ep_idx].ep_type == USB_ENDPOINT_TYPE_ISOCHRONOUS ||
+        g_dwc2_udc[busid].in_ep[ep_idx].ep_type == USB_ENDPOINT_TYPE_INTERRUPT) {
         USB_OTG_INEP(ep_idx)->DIEPTSIZ &= ~(USB_OTG_DIEPTSIZ_MULCNT);
-        USB_OTG_INEP(ep_idx)->DIEPTSIZ |= (USB_OTG_DIEPTSIZ_MULCNT & (1U << 29));
+        USB_OTG_INEP(ep_idx)->DIEPTSIZ |= (USB_OTG_DIEPTSIZ_MULCNT & ((usbd_get_ep_mult(busid, ep) + 1) << 29));
     }
 
     if (g_dwc2_udc[busid].user_params.device_dma_enable) {
@@ -943,6 +948,7 @@ int usbd_ep_start_read(uint8_t busid, const uint8_t ep, uint8_t *data, uint32_t 
     }
 
     if (g_dwc2_udc[busid].user_params.device_dma_enable) {
+        usb_dcache_invalidate((uintptr_t)data, USB_ALIGN_UP(data_len, CONFIG_USB_ALIGN_SIZE));
         USB_OTG_OUTEP(ep_idx)->DOEPDMA = (uint32_t)data;
     }
     if (g_dwc2_udc[busid].out_ep[ep_idx].ep_type == USB_ENDPOINT_TYPE_ISOCHRONOUS) {
@@ -1004,25 +1010,44 @@ void USBD_IRQHandler(uint8_t busid)
 
                     if ((epint & USB_OTG_DOEPINT_XFRC) == USB_OTG_DOEPINT_XFRC) {
                         if (ep_idx == 0) {
+                            if (usbd_get_ep0_next_state(busid) == USBD_EP0_STATE_SETUP) {
+                                goto process_setup; // goto ep0 setup, xfer_len is not used
+                            }
+
                             if (g_dwc2_udc[busid].out_ep[ep_idx].xfer_len == 0) {
+                                /* If ep0 xfer_len is 0, it means that we are in outstatus phase */
+                                g_dwc2_udc[busid].out_ep[ep_idx].actual_xfer_len = 0;
+                            } else {
+                                /* If ep0 xfer_len is not 0, it means that we are in outdata phase */
+                                g_dwc2_udc[busid].out_ep[ep_idx].actual_xfer_len = g_dwc2_udc[busid].out_ep[ep_idx].xfer_len - ((USB_OTG_OUTEP(ep_idx)->DOEPTSIZ) & USB_OTG_DOEPTSIZ_XFRSIZ);
+                            }
+
+                            g_dwc2_udc[busid].out_ep[ep_idx].xfer_len = 0;
+                            if (g_dwc2_udc[busid].user_params.device_dma_enable) {
+                                usb_dcache_invalidate((uintptr_t)g_dwc2_udc[busid].out_ep[ep_idx].xfer_buf, USB_ALIGN_UP(g_dwc2_udc[busid].out_ep[ep_idx].actual_xfer_len, CONFIG_USB_ALIGN_SIZE));
+                            }
+                            usbd_event_ep_out_complete_handler(busid, 0x00, g_dwc2_udc[busid].out_ep[ep_idx].actual_xfer_len);
+
+                            if (usbd_get_ep0_next_state(busid) == USBD_EP0_STATE_SETUP) {
                                 /* Out status, start reading setup */
                                 dwc2_ep0_start_read_setup(busid, (uint8_t *)&g_dwc2_udc[busid].setup);
-                            } else {
-                                g_dwc2_udc[busid].out_ep[ep_idx].actual_xfer_len = g_dwc2_udc[busid].out_ep[ep_idx].xfer_len - ((USB_OTG_OUTEP(ep_idx)->DOEPTSIZ) & USB_OTG_DOEPTSIZ_XFRSIZ);
-                                g_dwc2_udc[busid].out_ep[ep_idx].xfer_len = 0;
-                                usb_dcache_invalidate((uintptr_t)g_dwc2_udc[busid].out_ep[ep_idx].xfer_buf, USB_ALIGN_UP(g_dwc2_udc[busid].out_ep[ep_idx].actual_xfer_len, CONFIG_USB_ALIGN_SIZE));
-                                usbd_event_ep_out_complete_handler(busid, 0x00, g_dwc2_udc[busid].out_ep[ep_idx].actual_xfer_len);
                             }
                         } else {
                             g_dwc2_udc[busid].out_ep[ep_idx].actual_xfer_len = g_dwc2_udc[busid].out_ep[ep_idx].xfer_len - ((USB_OTG_OUTEP(ep_idx)->DOEPTSIZ) & USB_OTG_DOEPTSIZ_XFRSIZ);
                             g_dwc2_udc[busid].out_ep[ep_idx].xfer_len = 0;
-                            usb_dcache_invalidate((uintptr_t)g_dwc2_udc[busid].out_ep[ep_idx].xfer_buf, USB_ALIGN_UP(g_dwc2_udc[busid].out_ep[ep_idx].actual_xfer_len, CONFIG_USB_ALIGN_SIZE));
+                            if (g_dwc2_udc[busid].user_params.device_dma_enable) {
+                                usb_dcache_invalidate((uintptr_t)g_dwc2_udc[busid].out_ep[ep_idx].xfer_buf, USB_ALIGN_UP(g_dwc2_udc[busid].out_ep[ep_idx].actual_xfer_len, CONFIG_USB_ALIGN_SIZE));
+                            }
                             usbd_event_ep_out_complete_handler(busid, ep_idx, g_dwc2_udc[busid].out_ep[ep_idx].actual_xfer_len);
                         }
                     }
-
+                // clang-format off
+process_setup:
+                    // clang-format on
                     if ((epint & USB_OTG_DOEPINT_STUP) == USB_OTG_DOEPINT_STUP) {
-                        usb_dcache_invalidate((uintptr_t)&g_dwc2_udc[busid].setup, USB_ALIGN_UP(8, CONFIG_USB_ALIGN_SIZE));
+                        if (g_dwc2_udc[busid].user_params.device_dma_enable) {
+                            usb_dcache_invalidate((uintptr_t)&g_dwc2_udc[busid].setup, USB_ALIGN_UP(8, CONFIG_USB_ALIGN_SIZE));
+                        }
                         usbd_event_ep0_setup_complete_handler(busid, (uint8_t *)&g_dwc2_udc[busid].setup);
                     }
                 }
@@ -1043,10 +1068,7 @@ void USBD_IRQHandler(uint8_t busid)
                             g_dwc2_udc[busid].in_ep[ep_idx].xfer_len = 0;
                             usbd_event_ep_in_complete_handler(busid, 0x80, g_dwc2_udc[busid].in_ep[ep_idx].actual_xfer_len);
 
-                            if (g_dwc2_udc[busid].setup.wLength && ((g_dwc2_udc[busid].setup.bmRequestType & USB_REQUEST_DIR_MASK) == USB_REQUEST_DIR_OUT)) {
-                                /* In status, start reading setup */
-                                dwc2_ep0_start_read_setup(busid, (uint8_t *)&g_dwc2_udc[busid].setup);
-                            } else if (g_dwc2_udc[busid].setup.wLength == 0) {
+                            if (usbd_get_ep0_next_state(busid) == USBD_EP0_STATE_SETUP) {
                                 /* In status, start reading setup */
                                 dwc2_ep0_start_read_setup(busid, (uint8_t *)&g_dwc2_udc[busid].setup);
                             }

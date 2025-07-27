@@ -47,9 +47,6 @@
 #define CONFIG_USBDEV_REQUEST_BUFFER_LEN 512
 #endif
 
-/* Setup packet log for debug */
-// #define CONFIG_USBDEV_SETUP_LOG_PRINT
-
 /* Send ep0 in data from user buffer instead of copying into ep0 reqdata
  * Please note that user buffer must be aligned with CONFIG_USB_ALIGN_SIZE
 */
@@ -157,7 +154,7 @@
 #define CONFIG_USBHOST_MAX_EXTHUBS          1
 #define CONFIG_USBHOST_MAX_EHPORTS          4
 #define CONFIG_USBHOST_MAX_INTERFACES       8
-#define CONFIG_USBHOST_MAX_INTF_ALTSETTINGS 8
+#define CONFIG_USBHOST_MAX_INTF_ALTSETTINGS 1
 #define CONFIG_USBHOST_MAX_ENDPOINTS        4
 
 #define CONFIG_USBHOST_MAX_CDC_ACM_CLASS 4
@@ -253,9 +250,10 @@
 /* ================ USB Device Port Configuration ================*/
 
 #ifndef CONFIG_USBDEV_MAX_BUS
-#define CONFIG_USBDEV_MAX_BUS 1 // for now, bus num must be 1 except hpm ip
+#define CONFIG_USBDEV_MAX_BUS 1
 #endif
 
+/* only useful for musb/ch32/chipidea */
 #ifndef CONFIG_USBDEV_EP_NUM
 #define CONFIG_USBDEV_EP_NUM 8
 #endif
@@ -286,6 +284,7 @@
 #define CONFIG_USBHOST_MAX_BUS 1
 #endif
 
+/* only useful for musb */
 #ifndef CONFIG_USBHOST_PIPE_NUM
 #define CONFIG_USBHOST_PIPE_NUM 10
 #endif
@@ -294,7 +293,7 @@
 
 #define CONFIG_USB_EHCI_HCCR_OFFSET     (0x0)
 #define CONFIG_USB_EHCI_FRAME_LIST_SIZE 1024
-#define CONFIG_USB_EHCI_QH_NUM          CONFIG_USBHOST_PIPE_NUM
+#define CONFIG_USB_EHCI_QH_NUM          10
 #define CONFIG_USB_EHCI_QTD_NUM         (CONFIG_USB_EHCI_QH_NUM * 3)
 #define CONFIG_USB_EHCI_ITD_NUM         4
 // #define CONFIG_USB_EHCI_HCOR_RESERVED_DISABLE
@@ -305,7 +304,7 @@
 
 /* ---------------- OHCI Configuration ---------------- */
 #define CONFIG_USB_OHCI_HCOR_OFFSET (0x0)
-#define CONFIG_USB_OHCI_ED_NUM CONFIG_USBHOST_PIPE_NUM
+#define CONFIG_USB_OHCI_ED_NUM 10
 #define CONFIG_USB_OHCI_TD_NUM 3
 // #define CONFIG_USB_OHCI_DESC_DCACHE_ENABLE
 
